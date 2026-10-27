@@ -31,3 +31,43 @@ jobs:
         run: npm run build
         env:
           CI: 'false'
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t open-source-nvr .
+      - name: Smoke test
+        run: |
+          docker run -d --name nvr -p 8080:8080 -e NVR_ADMIN_PASSWORD=ci-password-1 open-source-nvr
+          for i in $(seq 1 30); do curl -fsS localhost:8080/api/me && break; sleep 1; done
+          curl -fsS localhost:8080/api/me
+          curl -fsS -o /dev/null localhost:8080/
+          docker exec nvr ffmpeg -version | head -1
+          docker exec nvr ffprobe -version | head -1
+          docker exec nvr test -x /usr/local/bin/go2rtc
+          docker exec nvr ls -l /opt/models
+          # the Edge TPU library must load: with no Coral the detector reports that, it must not fail on a missing library
+          docker exec nvr /opt/venv/bin/python /app/detector/detector.py --backend edgetpu --model /opt/models/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite < /dev/null | tee edgetpu.txt || true
+          grep -q '"type":"error"' edgetpu.txt
+          ! grep -q "cannot open shared object" edgetpu.txt
+      - name: Real model on the CPU
+        run: |
+          docker exec -i nvr /opt/venv/bin/python - <<'EOF'
+          import json, struct, subprocess
+          p = subprocess.Popen(['/opt/venv/bin/python', '/app/detector/detector.py', '--backend', 'cpu',
+                                '--model', '/opt/models/ssd_mobilenet_v2_coco_quant_postprocess.tflite',
+                                '--labels', '/opt/models/coco_labels.txt'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+          ready = json.loads(p.stdout.readline())
+          assert ready['type'] == 'ready' and ready['input'] == [300, 300], ready
+          w, h = ready['input']
+          p.stdin.write(struct.pack('<4sIHH', b'NVRD', 1, w, h) + bytes(w * h * 3)); p.stdin.flush()
+          r = json.loads(p.stdout.readline())
+          assert r['type'] == 'result' and isinstance(r['detections'], list), r
+          print('cpu inference ok', r['ms'], 'ms')
+          p.stdin.close()
+          EOF
+      - name: Logs
+        if: always()
+        run: docker logs nvr

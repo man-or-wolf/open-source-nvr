@@ -1,0 +1,21 @@
+services:
+  nvr:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data          # database, users, settings
+      - /mnt/nvr:/video       # recordings: set "Disk Mount Folder" to /video in the settings
+    devices:
+      # USB Coral. Pass the whole bus: the Coral changes its USB id the first time it is used.
+      - /dev/bus/usb:/dev/bus/usb
+      # PCIe / M.2 Coral:
+      # - /dev/apex_0:/dev/apex_0
+    environment:
+      # first admin password (only used while there are no users), otherwise a random one is printed in the log
+      - NVR_ADMIN_PASSWORD=change-me-please
+      # behind a reverse proxy that terminates TLS:
+      # - TRUST_PROXY=1
+      # - HSTS=1
+    stop_grace_period: 20s

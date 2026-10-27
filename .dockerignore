@@ -1,0 +1,15 @@
+.git
+.github
+node_modules
+lib
+build
+mydb
+video
+test
+old
+assets
+detector/models
+detector/__pycache__
+*.md
+Dockerfile
+docker-compose.yml

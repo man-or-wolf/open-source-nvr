@@ -203,6 +203,37 @@ The install folder must include the following files
   
 
   
+## Docker
+
+The image has everything: Node, ffmpeg, the Coral runtime (`libedgetpu1-std`), a python environment for the detector, the SSD MobileNet models and go2rtc.
+
+```
+docker compose up -d --build       # see docker-compose.yml, edit the volumes and the password first
+# or
+docker build -t open-source-nvr .
+docker run -d --name nvr -p 8080:8080 -v ./data:/data -v /mnt/nvr:/video \
+  --device /dev/bus/usb:/dev/bus/usb -e NVR_ADMIN_PASSWORD=change-me-please open-source-nvr
+```
+
+Then open `http://<host>:8080`, sign in as `admin`, and in **Settings** use:
+
+| Setting | Value |
+|---|---|
+| Disk Mount Folder | `/video` |
+| Detector | Google Coral TPU |
+| Model | `/opt/models/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite` (CPU: `.../ssd_mobilenet_v2_coco_quant_postprocess.tflite`) |
+| Labels file | `/opt/models/coco_labels.txt` (or leave empty) |
+| go2rtc binary | `/usr/local/bin/go2rtc` |
+
+The python path is already set (`DETECTOR_PYTHON`), leave it empty.
+
+* **USB Coral**: pass the whole bus (`--device /dev/bus/usb`), the Coral changes its USB id the first time it is used. The container runs as the non-root user `node`, so the device must be readable by it: on the host add `/etc/udev/rules.d/99-edgetpu.rules` with `SUBSYSTEM=="usb", ATTRS{idVendor}=="1a6e", MODE="0666"` and `SUBSYSTEM=="usb", ATTRS{idVendor}=="18d1", MODE="0666"`, then replug it. (Or run with `--user root`.)
+* **PCIe / M.2 Coral**: install the `gasket-dkms` driver on the host and pass `--device /dev/apex_0` (plus `--group-add` for the group that owns it, or `--user root`).
+* **arm64**: there is no `tflite-runtime` wheel for aarch64, so `ai-edge-litert` is installed. CPU detection works, the Edge TPU delegate is not verified with it. x86_64 uses `tflite-runtime`, which is known to work with the Coral.
+* Build without go2rtc: `--build-arg INSTALL_GO2RTC=false`. Different version: `--build-arg GO2RTC_VERSION=...`.
+* `/data` holds the database and users, `/video` the recordings. Only publish port 8080 to a network you trust, or put a TLS proxy in front (`TRUST_PROXY=1`).
+* Logs and the generated admin password (if you did not set one): `docker logs nvr`.
+
 ## To run the server each time the machine starts
 
 Create a executable `web.sh` file containing the following (the paths need to be absolute):

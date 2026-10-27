@@ -1,5 +1,6 @@
 const lexint = require('lexicographic-integer')
 
+import fs from 'fs'
 import level from 'level'
 import sub from 'subleveldown'
 import httpProxy from 'http-proxy'
@@ -11,6 +12,9 @@ import type { CameraCache, SettingsCache } from './types.js'
 // Shared mutable state. Modules read and change it through these objects (never reassign the exports).
 
 export const PORT = process.env['PORT'] || 8080
+
+// level creates the database folder but not its parents
+fs.mkdirSync(process.env['DBPATH'] || './mydb', { recursive: true })
 
 export const db = level(process.env['DBPATH'] || './mydb',  { valueEncoding : 'json' })
 
