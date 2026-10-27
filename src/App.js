@@ -2,10 +2,13 @@
 import './App.css';
 import React, { useEffect }  from 'react';
 import videojs from 'video.js'
+import 'video.js/dist/video-js.css'
 import { ThemeProvider, CommandBar, Text, DetailsList, Stack, Selection, SelectionMode } from '@fluentui/react'
 import { initializeIcons } from '@fluentui/react/lib/Icons';
 import { createTheme } from '@fluentui/react';
 import { PanelSettings } from './PanelSettings.js'
+import { Login } from './Login.js'
+import { PanelUsers } from './PanelUsers.js'
 
 const appTheme = createTheme({
   defaultFontStyle: { fontWeight: 'regular' },
@@ -73,8 +76,42 @@ function VideoJS (props)  {
 }
 
 
-function App() {
+// Low latency live view from go2rtc (MSE over websocket). Falls back to nothing if the script cannot load.
+function LiveStream({ stream }) {
+  const ref = React.useRef(null)
+  React.useEffect(() => {
+    let el = null, cancelled = false
+    import(/* webpackIgnore: true */ '/go2rtc/video-stream.js').then(() => {
+      if (cancelled || !ref.current) return
+      el = document.createElement('video-stream')
+      el.mode = 'mse'
+      el.style.width = '100%'
+      el.src = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/go2rtc/api/ws?src=${encodeURIComponent(stream)}`
+      ref.current.appendChild(el)
+    }).catch((e) => console.warn('go2rtc live view unavailable', e))
+    return () => { cancelled = true; if (el) el.remove() }
+  }, [stream])
+  return <div ref={ref} style={{ width: '100%', background: '#000' }} />
+}
 
+// Shows the login form until there is a session
+function App() {
+  const [me, setMe] = React.useState(undefined)
+
+  const refreshMe = React.useCallback(() => {
+    fetch('/api/me').then(r => r.json()).then(setMe).catch(() => setMe({ authEnabled: true, user: null }))
+  }, [])
+  useEffect(refreshMe, [refreshMe])
+
+  if (me === undefined) return null
+  if (me.authEnabled && !me.user) return <Login onLogin={refreshMe} />
+  return <Main me={me} refreshMe={refreshMe} />
+}
+
+function Main({ me, refreshMe }) {
+
+  const isAdmin = !me.authEnabled || (me.user && me.user.role === 'admin')
+  const [showUsers, setShowUsers] = React.useState(false)
   const [panel, setPanel] = React.useState({open: false, invalidArray: []});
 
   //const [invalidArray, setInvalidArray] = React.useState([])
@@ -111,7 +148,10 @@ function App() {
     console.log ('getServerData, mode=', mode)
     setData({...init_data, status: 'fetching'})
     fetch(`/api/movements?mode=${mode}`)
-      .then(res => res.json())
+      .then(res => {
+        if (res.status === 401) { refreshMe(); throw new Error('signed out') }
+        return res.json()
+      })
       .then(
         (result) => {
           setData({...result, status: 'success'})
@@ -148,6 +188,11 @@ function App() {
     if (cKey && mPlayer && (!currentPlaying || (currentPlaying.cKey !== cKey || currentPlaying.mKey !== mKey))) {
 
       setCurrentPlaying({ cKey, mKey})
+      // live view from go2rtc when available, recordings (and live without go2rtc) use HLS
+      if (!mKey && data.cameras.find(c => c.key === cKey)?.live_stream) {
+        mPlayer.pause()
+        return
+      }
       mPlayer.src({
         src: `/video/${mKey ? `${mStartSegment}/${mSeconds}` : 'live' }/${cKey}/stream.m3u8${(mKey && segments_prior_to_movement) ? `?preseq=${segments_prior_to_movement}&postseq=${segments_post_movement}` : ''}`,
         type: 'application/x-mpegURL'
@@ -214,7 +259,7 @@ function App() {
       if (ml.success) {
         //const filteredTags = filterIgnoreTags(cameraKey, ml)
         if (ml.tags.length > 0) {
-          return <a target="_blank" href={img}><Stack>{ml.tags.map((t, idx) => <Text key={idx} variant="mediumPlus" >{t.tag} ({t.probability})</Text>)}</Stack></a>
+          return <a target="_blank" href={img}><Stack>{ml.tags.map((t, idx) => <Text key={idx} variant="mediumPlus" >{t.tag} ({t.probability}){t.zones && t.zones.length > 0 ? ` @ ${t.zones.join(', ')}` : ''}</Text>)}</Stack></a>
         } else {
           return <a target="_blank" href={img}><Text variant="mediumPlus" >ML Image</Text></a>
         }
@@ -232,6 +277,9 @@ function App() {
     }
   }
 
+  const playingCamera = currentPlaying && data.cameras.find(c => c.key === currentPlaying.cKey)
+  const liveStream = currentPlaying && !currentPlaying.mKey && playingCamera ? playingCamera.live_stream : undefined
+
   return (
     <main>
 
@@ -248,12 +296,15 @@ function App() {
       <div style={{ "height": "34px", "width": "100%" }} />
 
       <PanelSettings data={data} panel={panel} setPanel={setPanel} getServerData={getServerData}/>
+      <PanelUsers open={showUsers} onDismiss={() => setShowUsers(false)} me={me.user && { name: me.user.name, role: me.user.role }} />
 
       <Stack horizontal wrap >
 
 
         {showPlayer &&
           <Stack.Item styles={{ root: { width: "700px" } }} grow={1}>
+            {liveStream && <LiveStream stream={liveStream} />}
+            <div style={liveStream ? { display: 'none' } : {}}>
             <VideoJS  options={{
                 autoplay: true,
                 muted:"muted",
@@ -261,6 +312,7 @@ function App() {
                 aspectRatio: '4:3',
                 liveui: true
               }} onReady={handlePlayerReady}/>
+            </div>
 
 
           </Stack.Item>
@@ -348,14 +400,14 @@ function App() {
               iconOnly: true,
               iconProps: { iconName: 'Settings' },
               subMenuProps: {
-                items: [{
+                items: (isAdmin ? [{
                     key: 'settings',
                     text: 'Settings',
                     iconProps: { iconName: 'DataManagementSettings' },
                     onClick: () => {
                       setPanel({...panel, open: true, key: 'settings', invalidArray:[], heading: 'General and Disk Settings', values: { ...data.config.settings }})
                     }
-                }].concat(data.cameras.map(c => { return {
+                }] : []).concat(!isAdmin ? [] : data.cameras.map(c => { return {
                     key: c.key,
                     text: `Settings "${c.name}"`,
                     iconProps: { iconName: 'FrontCamera' },
@@ -374,6 +426,19 @@ function App() {
                         ignore_tags: c.ignore_tags,
                         enable_streaming: c.enable_streaming,
                         enable_movement: c.enable_movement,
+                        camera_type: c.camera_type || 'reolink',
+                        record_audio: c.record_audio,
+                        detect_enabled: c.detect_enabled,
+                        detect_fps: c.detect_fps,
+                        detect_width: c.detect_width,
+                        track_objects: c.track_objects,
+                        min_score: c.min_score,
+                        require_object: c.require_object,
+                        motion_threshold: c.motion_threshold,
+                        motion_area: c.motion_area,
+                        motion_mask: c.motion_mask,
+                        object_mask: c.object_mask,
+                        zones: c.zones,
                       }})
                     }
                   }}).concat (
@@ -382,6 +447,9 @@ function App() {
                     text: 'Add Camera',
                     iconProps: { iconName: 'Add' },
                     onClick: () => setPanel({...panel, open: true, key: 'new', invalidArray: [], heading: 'Add New Camera', values: {
+                      camera_type: 'rtsp',
+                      detect_enabled: true,
+                      require_object: true,
                       secWithoutMovement: 10,
                       secMaxSingleMovement: 600,
                       mSPollFrequency: 1000,
@@ -393,7 +461,17 @@ function App() {
                       enable_movement: true,
                     }}),
                   }
-                ))
+                )).concat([{
+                    key: 'users',
+                    text: 'Users and password',
+                    iconProps: { iconName: 'People' },
+                    onClick: () => setShowUsers(true)
+                  }]).concat(me.authEnabled ? [{
+                    key: 'signout',
+                    text: `Sign out (${me.user.name})`,
+                    iconProps: { iconName: 'SignOut' },
+                    onClick: () => fetch('/api/logout', { method: 'POST' }).then(refreshMe)
+                  }] : [])
               }
             }]}
             ariaLabel="Inbox actions"

@@ -1,0 +1,6 @@
+numpy
+# Pick ONE tflite runtime. Coral needs libedgetpu1-std installed on the host (see README).
+# tflite-runtime supports Python <= 3.11 and works with the Coral delegate;
+# ai-edge-litert is the maintained successor for newer Pythons.
+tflite-runtime; python_version < "3.12"
+ai-edge-litert; python_version >= "3.12"

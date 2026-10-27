@@ -32,3 +32,6 @@ video
 *.service
 .env
 web.sh
+# detector
+detector/models
+__pycache__

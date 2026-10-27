@@ -4,9 +4,13 @@
   "private": true,
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
+    "build": "INLINE_RUNTIME_CHUNK=false react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "build:server": "tsc",
+    "test:server": "tsc && node --test test/*.test.js",
+    "test:detector": "python3 test/test_detector.py",
+    "test:e2e": "tsc && node test/e2e/e2e.js"
   },
   "eslintConfig": {
     "extends": [
@@ -30,6 +34,7 @@
     "@fluentui/azure-themes": "^8.2.41",
     "@fluentui/react": "^8.52.3",
     "@tsconfig/node16": "^1.0.2",
+    "@types/http-proxy": "^1.17.17",
     "@types/koa__router": "^8.0.11",
     "@types/koa-bodyparser": "^4.3.5",
     "@types/level": "^6.0.0",
@@ -42,11 +47,13 @@
   "dependencies": {
     "@koa/router": "^10.1.1",
     "avsc": "^5.7.3",
+    "http-proxy": "^1.18.1",
     "koa": "^2.13.4",
     "koa-bodyparser": "^4.3.0",
     "koa-send": "^5.0.1",
     "level": "^7.0.1",
     "lexicographic-integer": "^1.1.0",
+    "mqtt": "^5.16.1",
     "react-scripts": "^5.0.0",
     "subleveldown": "^6.0.1"
   }
